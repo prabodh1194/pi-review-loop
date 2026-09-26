@@ -1,5 +1,5 @@
-import { relative, sep } from "node:path";
-import { watch, type FSWatcher } from "chokidar";
+import { sep } from "node:path";
+import { watch, type FSWatcher } from "node:fs";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { open, type GlimpseWindow } from "glimpseui";
 import { createCheckpoint, getRepoRoot } from "./git.js";
@@ -83,7 +83,7 @@ export class ReviewController {
   async close(): Promise<void> {
     if (this.refreshTimer != null) clearTimeout(this.refreshTimer);
     this.refreshTimer = null;
-    await this.watcher?.close();
+    this.watcher?.close();
     this.watcher = null;
     const window = this.window;
     this.window = null;
@@ -91,24 +91,16 @@ export class ReviewController {
   }
 
   private async startWatcher(): Promise<void> {
-    this.watcher = watch(this.repoRoot, {
-      ignoreInitial: true,
-      ignored: (path) => {
-        const rel = relative(this.repoRoot, path);
-        return rel === ".git" || rel.startsWith(`.git${sep}`) || rel === "node_modules" || rel.startsWith(`node_modules${sep}`);
-      },
-    });
-    this.watcher.on("all", (_event, path) => {
-      const repoPath = this.toRepoPath(path);
-      if (repoPath == null) return;
+    // One recursive watch (FSEvents on macOS). chokidar opened one fd per directory
+    // and hit EMFILE on repos with nested worktrees or untracked virtualenvs.
+    this.watcher = watch(this.repoRoot, { recursive: true }, (_event, file) => {
+      if (file == null) return;
+      const rel = file.toString();
+      const top = rel.split(sep)[0];
+      if (top === ".git" || top === "node_modules") return;
       this.scheduleRefresh();
     });
-  }
-
-  private toRepoPath(absolutePath: string): string | null {
-    const path = relative(this.repoRoot, absolutePath);
-    if (!path || path === ".." || path.startsWith(`..${sep}`)) return null;
-    return path.split(sep).join("/");
+    this.watcher.on("error", () => {});
   }
 
   private scheduleRefresh(): void {
