@@ -1,0 +1,58 @@
+name: Sync upstream
+
+# Merge earendil-works/pi-review-loop main into this fork's main daily.
+# Our fixes stay on top as regular commits. A merge conflict or a failing
+# check stops the run before anything is pushed; GitHub emails on failure.
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Merge upstream main
+        id: merge
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/earendil-works/pi-review-loop.git
+          git fetch upstream main
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo "Already up to date with upstream."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git merge --no-edit upstream/main -m "Merge upstream main"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v4
+        if: steps.merge.outputs.changed == 'true'
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Check merged tree
+        if: steps.merge.outputs.changed == 'true'
+        run: |
+          npm ci
+          npm run check
+          npm test
+
+      - name: Push
+        if: steps.merge.outputs.changed == 'true'
+        run: git push origin HEAD:main
