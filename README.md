@@ -1,5 +1,11 @@
 # Review Loop
 
+> Fork of [earendil-works/pi-review-loop](https://github.com/earendil-works/pi-review-loop).
+> Adds PR review (`/diff-review <base>`) and a watcher that does not hit EMFILE on large repos.
+> A daily GitHub Action merges upstream `main` into this fork.
+>
+> Install: `pi install git:github.com/prabodh1194/pi-review-loop`
+
 A persistent, incremental diff reviewer for [pi](https://pi.dev).
 
 Review Loop keeps a native review window open while the agent works. Submitting a review records the current workspace as a session-backed checkpoint, so the next review can show only the changes made afterward.
@@ -69,6 +75,23 @@ current HEAD → current workspace
 This shows the complete current working-tree change set, including changes already covered by a review checkpoint. Files that still match the last checkpoint display a green reviewed checkmark; files changed afterward retain the blue pending indicator.
 
 Changing modes does not alter the checkpoint. Submitting a review always checkpoints the current workspace.
+
+## PR review
+
+Pass a ref to review committed changes the way a pull request shows them:
+
+```
+/diff-review main                  # main...HEAD
+/diff-review origin/main...feature # a branch you have not checked out
+/diff-review origin/main..pr-42    # after: git fetch origin pull/42/head:pr-42
+```
+
+The diff runs from the merge-base of the two refs to the head commit. Both sides come from git, so the working tree, uncommitted edits, and the current checkout do not matter.
+
+- Left pane is **Base**, right pane is **Head**. Inline comments and file notes work on both.
+- **Send comments** pastes them into pi's editor as `path:line (base)` / `path:line (head)`. Nothing is sent until you submit in pi.
+- No checkpoint is saved and the window does not watch files. Run `/diff-review <ref>` again to reload.
+- Running `/diff-review` with no argument returns to the incremental reviewer.
 
 ## Recently Changed and the file tree
 

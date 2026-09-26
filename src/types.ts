@@ -1,4 +1,4 @@
-export type ReviewMode = "checkpoint" | "head";
+export type ReviewMode = "checkpoint" | "head" | "range";
 export type ChangeStatus = "modified" | "added" | "deleted";
 
 export interface ChangedFile {
@@ -13,6 +13,8 @@ export interface WorkspaceState {
   repoName: string;
   branch: string | null;
   mode: ReviewMode;
+  /** Set for a PR-style review: fixed commits, no checkpoint, no file watching. */
+  range?: string;
   hasCheckpoint: boolean;
   checkpointCreatedAt?: number;
   files: ChangedFile[];

@@ -13,13 +13,13 @@ export default function reviewLoop(pi: ExtensionAPI) {
     return controller;
   };
 
-  const openReview = async (_args: string, ctx: ExtensionCommandContext): Promise<void> => {
+  const openReview = async (args: string, ctx: ExtensionCommandContext): Promise<void> => {
     if (ctx.mode !== "tui") {
       ctx.ui.notify("Review Loop requires interactive TUI mode.", "warning");
       return;
     }
     try {
-      await getController().openOrShow(ctx);
+      await getController().openOrShow(ctx, args.trim());
     } catch (error) {
       controller = null;
       ctx.ui.notify(`Could not open Review Loop: ${error instanceof Error ? error.message : String(error)}`, "error");
@@ -27,7 +27,7 @@ export default function reviewLoop(pi: ExtensionAPI) {
   };
 
   pi.registerCommand("diff-review", {
-    description: "Open the persistent incremental diff reviewer",
+    description: "Open the incremental diff reviewer. With a ref (main, main...feature, origin/main..pr-42), review that range like a PR.",
     handler: openReview,
   });
 

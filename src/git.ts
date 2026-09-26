@@ -163,6 +163,44 @@ export async function scanAgainstHead(pi: ExtensionAPI, repoRoot: string): Promi
   return scanAgainstCheckpoint(pi, repoRoot, { headSha: await getHeadSha(pi, repoRoot), overrides: {} });
 }
 
+export interface ReviewRange {
+  label: string;
+  baseSha: string;
+  headSha: string;
+}
+
+async function resolveRef(pi: ExtensionAPI, repoRoot: string, ref: string): Promise<string> {
+  const sha = (await git(pi, repoRoot, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], true)).trim();
+  if (!sha) throw new Error(`Unknown git ref: ${ref}`);
+  return sha;
+}
+
+/** "base", "base...head" or "base..head". Diffs from the merge-base, like a GitHub PR. */
+export async function resolveRange(pi: ExtensionAPI, repoRoot: string, spec: string): Promise<ReviewRange> {
+  const [base, head = "HEAD"] = spec.trim().split(/\.{2,3}/);
+  const [baseTip, headSha] = await Promise.all([resolveRef(pi, repoRoot, base!), resolveRef(pi, repoRoot, head || "HEAD")]);
+  const baseSha = (await git(pi, repoRoot, ["merge-base", baseTip, headSha])).trim();
+  return { label: `${base}...${head || "HEAD"}`, baseSha, headSha };
+}
+
+export async function scanRange(pi: ExtensionAPI, repoRoot: string, range: ReviewRange): Promise<FilePair[]> {
+  const paths = splitZero(await git(pi, repoRoot, ["diff", "--name-only", "--no-renames", "-z", range.baseSha, range.headSha, "--"]));
+  const pairs = await Promise.all(paths.map(async (path): Promise<FilePair> => {
+    const [originalContent, modifiedContent] = await Promise.all([
+      readRevision(pi, repoRoot, range.baseSha, path),
+      readRevision(pi, repoRoot, range.headSha, path),
+    ]);
+    return {
+      path,
+      status: statusFor(originalContent, modifiedContent),
+      fingerprint: fingerprint(modifiedContent),
+      originalContent: originalContent ?? "",
+      modifiedContent: modifiedContent ?? "",
+    };
+  }));
+  return pairs.sort((a, b) => a.path.localeCompare(b.path));
+}
+
 export async function createCheckpoint(
   pi: ExtensionAPI,
   repoRoot: string,

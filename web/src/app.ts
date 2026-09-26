@@ -382,7 +382,7 @@ function renderRecent(): void {
   if (files.length === 0) {
     const empty = document.createElement("div");
     empty.className = "empty-list";
-    empty.textContent = workspace.files.length ? "No recent matches" : workspace.mode === "checkpoint" ? "No new changes" : "Working tree is clean";
+    empty.textContent = workspace.files.length ? "No recent matches" : workspace.range ? "No changes in this range" : workspace.mode === "checkpoint" ? "No new changes" : "Working tree is clean";
     recentListEl.append(empty);
     return;
   }
@@ -397,7 +397,7 @@ function renderTree(): void {
   if (files.length === 0) {
     const empty = document.createElement("div");
     empty.className = "empty-list";
-    empty.textContent = searchInput.value ? "No matching files" : workspace.mode === "checkpoint" ? "Nothing since the last review" : "Working tree is clean";
+    empty.textContent = searchInput.value ? "No matching files" : workspace.range ? "No changes in this range" : workspace.mode === "checkpoint" ? "Nothing since the last review" : "Working tree is clean";
     fileTreeEl.append(empty);
     return;
   }
@@ -407,6 +407,11 @@ function renderTree(): void {
 function updateSubmitButton(): void {
   const count = workspace?.pendingFiles.length ?? 0;
   const commentCount = comments.filter((comment) => comment.body.trim().length > 0).length;
+  if (workspace?.range) {
+    submitButton.disabled = commentCount === 0;
+    submitButton.textContent = commentCount > 0 ? `Send ${commentCount} comment${commentCount === 1 ? "" : "s"}` : "Send comments";
+    return;
+  }
   submitButton.disabled = count === 0 && commentCount === 0;
   if (commentCount > 0) submitButton.textContent = `Submit ${commentCount} comment${commentCount === 1 ? "" : "s"} · review ${count}`;
   else if (count > 0) submitButton.textContent = `Mark ${count} reviewed`;
@@ -416,6 +421,12 @@ function updateSubmitButton(): void {
 function updateHeader(): void {
   if (workspace == null) return;
   repoNameEl.textContent = workspace.repoName;
+  const segment = checkpointButton.parentElement as HTMLElement;
+  segment.hidden = workspace.range != null;
+  if (workspace.range) {
+    repoMetaEl.textContent = `PR review · ${workspace.range}`;
+    return;
+  }
   const baseline = workspace.hasCheckpoint && workspace.checkpointCreatedAt
     ? `reviewed ${relativeTime(workspace.checkpointCreatedAt)} ago`
     : "not reviewed yet";
@@ -512,6 +523,7 @@ function requestActiveFile(): void {
 }
 
 function commentSideLabel(comment: ReviewComment): string {
+  if (comment.mode === "range") return comment.side === "modified" ? "Head" : "Base";
   if (comment.side === "modified") return "Current";
   return comment.mode === "head" ? "HEAD" : "Reviewed";
 }
@@ -739,7 +751,7 @@ window.__reviewReceive = (message: HostMessage): void => {
     renderTree();
     updateSubmitButton();
     syncInlineComments();
-    showToast(message.insertedFeedback ? "Checkpoint saved · feedback inserted into pi" : "Checkpoint saved");
+    showToast(workspace?.range ? (message.insertedFeedback ? "Comments inserted into pi" : "No comments") : message.insertedFeedback ? "Checkpoint saved · feedback inserted into pi" : "Checkpoint saved");
   }
 };
 

@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { fileMtime, getBranchName, getHeadSha, repoName, scanAgainstCheckpoint, scanAgainstHead, type FilePair } from "./git.js";
+import { fileMtime, getBranchName, getHeadSha, repoName, scanAgainstCheckpoint, scanAgainstHead, scanRange, type FilePair, type ReviewRange } from "./git.js";
 import type { ChangedFile, FileContents, ReviewCheckpoint, ReviewMode, WorkspaceState } from "./types.js";
 
 export class WorkspaceModel {
@@ -9,6 +9,7 @@ export class WorkspaceModel {
   private pairsByMode = new Map<ReviewMode, Map<string, FilePair>>();
   private mtimes = new Map<string, number>();
   private branch: string | null = null;
+  private range: ReviewRange | null = null;
 
   private constructor(
     private readonly pi: ExtensionAPI,
@@ -24,6 +25,18 @@ export class WorkspaceModel {
     return new WorkspaceModel(pi, repoRoot, checkpoint, await getHeadSha(pi, repoRoot));
   }
 
+  /** PR-style review of fixed commits. No checkpoint, one mode. */
+  static forRange(pi: ExtensionAPI, repoRoot: string, range: ReviewRange): WorkspaceModel {
+    const model = new WorkspaceModel(pi, repoRoot, null, range.headSha);
+    model.range = range;
+    model.mode = "range";
+    return model;
+  }
+
+  get isRange(): boolean {
+    return this.range != null;
+  }
+
   get currentMode(): ReviewMode {
     return this.mode;
   }
@@ -33,6 +46,7 @@ export class WorkspaceModel {
   }
 
   setMode(mode: ReviewMode): void {
+    if (this.range != null) return;
     this.mode = mode;
   }
 
@@ -47,6 +61,10 @@ export class WorkspaceModel {
   }
 
   async refresh(): Promise<WorkspaceState> {
+    if (this.range != null) {
+      this.pairsByMode.set("range", new Map((await scanRange(this.pi, this.repoRoot, this.range)).map((pair) => [pair.path, pair])));
+      return this.state();
+    }
     const [checkpointPairs, headPairs, branch] = await Promise.all([
       scanAgainstCheckpoint(this.pi, this.repoRoot, this.checkpointBaseline()),
       scanAgainstHead(this.pi, this.repoRoot),
@@ -69,7 +87,7 @@ export class WorkspaceModel {
       recentAt: this.mtimes.get(pair.path),
     });
     const files = [...(this.pairsByMode.get(this.mode)?.values() ?? [])].map(toChangedFile);
-    const pendingFiles = [...(this.pairsByMode.get("checkpoint")?.values() ?? [])].map(toChangedFile);
+    const pendingFiles = this.range != null ? files : [...(this.pairsByMode.get("checkpoint")?.values() ?? [])].map(toChangedFile);
     const recentPaths = [...files]
       .sort((a, b) => (b.recentAt ?? 0) - (a.recentAt ?? 0) || a.path.localeCompare(b.path))
       .map((file) => file.path);
@@ -79,6 +97,7 @@ export class WorkspaceModel {
       repoName: repoName(this.repoRoot),
       branch: this.branch,
       mode: this.mode,
+      range: this.range?.label,
       hasCheckpoint: this.checkpoint != null,
       checkpointCreatedAt: this.checkpoint?.createdAt,
       files,

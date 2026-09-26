@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 import test from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { composeFeedback } from "../src/prompt.js";
-import { createCheckpoint, decodeStored, parsePorcelainPaths, scanAgainstCheckpoint } from "../src/git.js";
+import { createCheckpoint, decodeStored, parsePorcelainPaths, resolveRange, scanAgainstCheckpoint, scanRange } from "../src/git.js";
 import { WorkspaceModel } from "../src/workspace.js";
 
 const execFileAsync = promisify(execFile);
@@ -63,6 +63,51 @@ test("bundled webview is self-contained and syntactically valid", async () => {
   assert.ok(workerMatch, "embedded worker bundle is present");
   assert.doesNotThrow(() => new Function(Buffer.from(appMatch[1]!, "base64").toString("utf8")));
   assert.doesNotThrow(() => new Function(Buffer.from(workerMatch[1]!, "base64").toString("utf8")));
+});
+
+test("range review diffs merge-base to head without touching the working tree", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "review-loop-range-"));
+  try {
+    await git(cwd, "init", "-b", "main");
+    await git(cwd, "config", "user.email", "test@example.com");
+    await git(cwd, "config", "user.name", "Test");
+    await writeFile(join(cwd, "app.ts"), "export const value = 1;\n");
+    await writeFile(join(cwd, "gone.ts"), "old\n");
+    await git(cwd, "add", ".");
+    await git(cwd, "commit", "-m", "initial");
+
+    await git(cwd, "checkout", "-b", "feature");
+    await writeFile(join(cwd, "app.ts"), "export const value = 2;\n");
+    await writeFile(join(cwd, "added.ts"), "new\n");
+    await git(cwd, "rm", "-q", "gone.ts");
+    await git(cwd, "add", ".");
+    await git(cwd, "commit", "-m", "feature");
+
+    await git(cwd, "checkout", "main");
+    await writeFile(join(cwd, "main-only.ts"), "main\n");
+    await git(cwd, "add", ".");
+    await git(cwd, "commit", "-m", "main moves on");
+    await writeFile(join(cwd, "app.ts"), "dirty working tree\n");
+
+    const range = await resolveRange(fakePi(), cwd, "main...feature");
+    assert.equal(range.label, "main...feature");
+    const pairs = await scanRange(fakePi(), cwd, range);
+    assert.deepEqual(pairs.map((pair) => [pair.path, pair.status]), [["added.ts", "added"], ["app.ts", "modified"], ["gone.ts", "deleted"]]);
+    assert.equal(pairs[1]!.originalContent, "export const value = 1;\n");
+    assert.equal(pairs[1]!.modifiedContent, "export const value = 2;\n");
+    assert.equal(await readFile(join(cwd, "app.ts"), "utf8"), "dirty working tree\n");
+
+    const single = await resolveRange(fakePi(), cwd, "main");
+    assert.equal(single.label, "main...HEAD");
+    await assert.rejects(resolveRange(fakePi(), cwd, "no-such-ref"), /no-such-ref/);
+
+    assert.equal(composeFeedback([
+      { path: "app.ts", mode: "range", side: "original", line: 1, body: "Why?" },
+      { path: "app.ts", mode: "range", side: "modified", line: 1, body: "Nice." },
+    ]), ["Please address the following review feedback:", "", "1. app.ts:1 (base)", "   Why?", "", "2. app.ts:1 (head)", "   Nice."].join("\n"));
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
 });
 
 test("checkpoint stores dirty state and produces only the next delta", async () => {

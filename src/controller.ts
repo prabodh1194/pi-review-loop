@@ -2,9 +2,9 @@ import { sep } from "node:path";
 import { watch, type FSWatcher } from "node:fs";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { open, type GlimpseWindow } from "glimpseui";
-import { createCheckpoint, getRepoRoot } from "./git.js";
+import { createCheckpoint, getRepoRoot, resolveRange } from "./git.js";
 import { composeFeedback } from "./prompt.js";
-import type { HostMessage, ReviewCheckpoint, WindowMessage } from "./types.js";
+import type { HostMessage, ReviewCheckpoint, ReviewComment, WindowMessage } from "./types.js";
 import { loadReviewHtml } from "./ui.js";
 import { WorkspaceModel } from "./workspace.js";
 
@@ -53,17 +53,20 @@ export class ReviewController {
     return this.window != null;
   }
 
-  async openOrShow(ctx: ExtensionCommandContext): Promise<void> {
-    if (this.window != null) {
+  async openOrShow(ctx: ExtensionCommandContext, rangeSpec = ""): Promise<void> {
+    if (this.window != null && !rangeSpec && !this.model?.isRange) {
       this.window.show({ title: "Review Loop" });
       ctx.ui.notify("Review Loop is already open.", "info");
       return;
     }
+    if (this.window != null) await this.close();
 
     this.repoRoot = await getRepoRoot(this.pi, ctx.cwd);
-    this.model = await WorkspaceModel.create(this.pi, this.repoRoot, latestCheckpoint(ctx, this.repoRoot));
+    this.model = rangeSpec
+      ? WorkspaceModel.forRange(this.pi, this.repoRoot, await resolveRange(this.pi, this.repoRoot, rangeSpec))
+      : await WorkspaceModel.create(this.pi, this.repoRoot, latestCheckpoint(ctx, this.repoRoot));
     await this.model.refresh();
-    await this.startWatcher();
+    if (!rangeSpec) await this.startWatcher();
 
     const window = open(loadReviewHtml(), { width: 1480, height: 920, title: "Review Loop" });
     this.window = window;
@@ -142,6 +145,10 @@ export class ReviewController {
     }
 
     if (message.type === "submit-review" && !this.submitting) {
+      if (this.model.isRange) {
+        this.submitRangeReview(message.comments, ctx);
+        return;
+      }
       this.submitting = true;
       try {
         const feedback = composeFeedback(message.comments);
@@ -160,6 +167,13 @@ export class ReviewController {
         this.submitting = false;
       }
     }
+  }
+
+  private submitRangeReview(comments: ReviewComment[], ctx: ExtensionCommandContext): void {
+    const feedback = composeFeedback(comments);
+    if (feedback) ctx.ui.pasteToEditor(feedback);
+    this.send({ type: "review-submitted", checkpointAt: Date.now(), insertedFeedback: feedback.length > 0 });
+    ctx.ui.notify(feedback ? "Review comments inserted into the editor." : "No comments to insert.", "info");
   }
 
   private send(message: HostMessage): void {
