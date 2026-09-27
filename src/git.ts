@@ -171,7 +171,7 @@ export interface ReviewRange {
 
 async function resolveRef(pi: ExtensionAPI, repoRoot: string, ref: string): Promise<string> {
   const sha = (await git(pi, repoRoot, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], true)).trim();
-  if (!sha) throw new Error(`Unknown git ref: ${ref}`);
+  if (!sha) throw new Error(`Unknown git ref: ${ref} in ${basename(repoRoot)} (${repoRoot}). Start pi in the repo that has it, or git fetch it there first.`);
   return sha;
 }
 

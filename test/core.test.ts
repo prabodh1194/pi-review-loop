@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import test from "node:test";
@@ -99,7 +99,12 @@ test("range review diffs merge-base to head without touching the working tree", 
 
     const single = await resolveRange(fakePi(), cwd, "main");
     assert.equal(single.label, "main...HEAD");
-    await assert.rejects(resolveRange(fakePi(), cwd, "no-such-ref"), /no-such-ref/);
+    await assert.rejects(resolveRange(fakePi(), cwd, "no-such-ref"), (error: Error) => {
+      assert.match(error.message, /no-such-ref/);
+      assert.match(error.message, new RegExp(`in ${basename(cwd)}`));
+      assert.match(error.message, /git fetch/);
+      return true;
+    });
 
     assert.equal(composeFeedback([
       { path: "app.ts", mode: "range", side: "original", line: 1, body: "Why?" },
